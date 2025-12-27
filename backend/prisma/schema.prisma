@@ -1,0 +1,385 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// AUTHENTICATION & USERS
+// ============================================================================
+
+enum UserRole {
+  ADMIN
+  MEMBER
+}
+
+model User {
+  id             String    @id @default(uuid())
+  username       String    @unique
+  email          String?   @unique
+  passwordHash   String
+  displayName    String
+  role           UserRole  @default(MEMBER)
+  isActive       Boolean   @default(true)
+
+  // 2FA Settings
+  twoFactorEnabled Boolean  @default(false)
+  twoFactorSecret  String?
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  lastLoginAt    DateTime?
+
+  // Relations
+  sessions       Session[]
+  createdUsers   User[]    @relation("CreatedByUser")
+  createdBy      User?     @relation("CreatedByUser", fields: [createdById], references: [id])
+  createdById    String?
+
+  workspaceAccess WorkspaceAccess[]
+  projects        Project[]
+  threads         Thread[]
+  messages        Message[]
+  uploads         Upload[]
+  rulesets        Ruleset[]
+  rulesetVersions RulesetVersion[]
+  auditLogs       AuditLog[]
+
+  @@index([username])
+  @@index([email])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token        String   @unique
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  lastActiveAt DateTime @default(now())
+
+  @@index([token])
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ============================================================================
+// WORKSPACES (Hard Separated: Normal, Church, Coder)
+// ============================================================================
+
+enum WorkspaceType {
+  NORMAL
+  CHURCH
+  CODER
+}
+
+model Workspace {
+  id          String        @id @default(uuid())
+  type        WorkspaceType @unique
+  name        String
+  description String?
+  settings    Json          @default("{}")
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Relations - All data is scoped to workspace
+  access      WorkspaceAccess[]
+  projects    Project[]
+  uploads     Upload[]
+  rulesets    Ruleset[]
+  auditLogs   AuditLog[]
+
+  @@index([type])
+}
+
+model WorkspaceAccess {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  canRead     Boolean   @default(true)
+  canWrite    Boolean   @default(true)
+  canAdmin    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+
+  @@unique([userId, workspaceId])
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+// ============================================================================
+// PROJECTS, THREADS & MESSAGES
+// ============================================================================
+
+model Project {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ownerId     String
+  owner       User      @relation(fields: [ownerId], references: [id])
+  isArchived  Boolean   @default(false)
+  settings    Json      @default("{}")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  threads     Thread[]
+  uploads     Upload[]
+  rulesetBindings ProjectRulesetBinding[]
+
+  @@index([workspaceId])
+  @@index([ownerId])
+  @@index([name])
+}
+
+model Thread {
+  id          String   @id @default(uuid())
+  title       String?
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  isArchived  Boolean  @default(false)
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  messages    Message[]
+
+  @@index([projectId])
+  @@index([createdById])
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model Message {
+  id          String      @id @default(uuid())
+  threadId    String
+  thread      Thread      @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  role        MessageRole
+  content     String
+  authorId    String?
+  author      User?       @relation(fields: [authorId], references: [id])
+  metadata    Json        @default("{}")
+
+  // For AI responses
+  modelUsed   String?
+  tokenCount  Int?
+
+  createdAt   DateTime    @default(now())
+
+  // Full-text search
+  @@index([threadId])
+  @@index([authorId])
+  @@index([content(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+// ============================================================================
+// UPLOADS (Store + Scan + Index)
+// ============================================================================
+
+enum UploadStatus {
+  PENDING
+  SCANNING
+  PROCESSING
+  INDEXED
+  FAILED
+  QUARANTINED
+}
+
+model Upload {
+  id            String       @id @default(uuid())
+  filename      String
+  originalName  String
+  mimeType      String
+  size          Int
+  storagePath   String
+  checksum      String
+
+  status        UploadStatus @default(PENDING)
+  scanResult    Json?
+  indexedContent String?     // Extracted text for search
+
+  workspaceId   String
+  workspace     Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  projectId     String?
+  project       Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  uploadedById  String
+  uploadedBy    User         @relation(fields: [uploadedById], references: [id])
+
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([workspaceId])
+  @@index([projectId])
+  @@index([uploadedById])
+  @@index([status])
+  @@index([filename])
+}
+
+// ============================================================================
+// RULESETS (Versioning + Lock Mechanism)
+// ============================================================================
+
+model Ruleset {
+  id              String    @id @default(uuid())
+  name            String
+  description     String?
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdById     String
+  createdBy       User      @relation(fields: [createdById], references: [id])
+
+  // Lock mechanism
+  isLocked        Boolean   @default(false)
+  lockedById      String?
+  lockedAt        DateTime?
+  lockReason      String?
+
+  // Current active version
+  currentVersionId String?  @unique
+
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  versions        RulesetVersion[]
+  projectBindings ProjectRulesetBinding[]
+
+  @@index([workspaceId])
+  @@index([createdById])
+  @@index([name])
+}
+
+model RulesetVersion {
+  id          String   @id @default(uuid())
+  rulesetId   String
+  ruleset     Ruleset  @relation(fields: [rulesetId], references: [id], onDelete: Cascade)
+  version     Int
+  rules       Json     // The actual rules content
+  changelog   String?
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@unique([rulesetId, version])
+  @@index([rulesetId])
+}
+
+model ProjectRulesetBinding {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  rulesetId   String
+  ruleset     Ruleset  @relation(fields: [rulesetId], references: [id], onDelete: Cascade)
+  priority    Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@unique([projectId, rulesetId])
+  @@index([projectId])
+  @@index([rulesetId])
+}
+
+// ============================================================================
+// AUDIT LOG (Records Every Action)
+// ============================================================================
+
+enum AuditAction {
+  // Auth
+  LOGIN
+  LOGOUT
+  LOGIN_FAILED
+  PASSWORD_CHANGE
+  TWO_FACTOR_ENABLE
+  TWO_FACTOR_DISABLE
+
+  // User Management
+  USER_CREATE
+  USER_UPDATE
+  USER_DEACTIVATE
+  USER_REACTIVATE
+
+  // Workspace
+  WORKSPACE_ACCESS_GRANT
+  WORKSPACE_ACCESS_REVOKE
+  WORKSPACE_SETTINGS_UPDATE
+
+  // Project
+  PROJECT_CREATE
+  PROJECT_UPDATE
+  PROJECT_ARCHIVE
+  PROJECT_DELETE
+
+  // Thread & Messages
+  THREAD_CREATE
+  THREAD_UPDATE
+  THREAD_ARCHIVE
+  MESSAGE_CREATE
+  MESSAGE_DELETE
+
+  // Uploads
+  UPLOAD_CREATE
+  UPLOAD_DELETE
+  UPLOAD_SCAN_COMPLETE
+  UPLOAD_QUARANTINE
+
+  // Rulesets
+  RULESET_CREATE
+  RULESET_UPDATE
+  RULESET_LOCK
+  RULESET_UNLOCK
+  RULESET_VERSION_CREATE
+  RULESET_BIND
+  RULESET_UNBIND
+
+  // Search
+  SEARCH_QUERY
+
+  // System
+  SYSTEM_ERROR
+}
+
+model AuditLog {
+  id          String      @id @default(uuid())
+  action      AuditAction
+  userId      String?
+  user        User?       @relation(fields: [userId], references: [id])
+  workspaceId String?
+  workspace   Workspace?  @relation(fields: [workspaceId], references: [id])
+
+  // What was affected
+  entityType  String?
+  entityId    String?
+
+  // Details
+  details     Json        @default("{}")
+  ipAddress   String?
+  userAgent   String?
+
+  createdAt   DateTime    @default(now())
+
+  @@index([action])
+  @@index([userId])
+  @@index([workspaceId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}

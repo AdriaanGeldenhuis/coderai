@@ -1,0 +1,126 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-bg: #0f172a;
+  --color-surface: #1e293b;
+  --color-border: #334155;
+  --color-text: #f1f5f9;
+  --color-text-muted: #94a3b8;
+}
+
+body {
+  @apply bg-slate-900 text-slate-100 antialiased;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-slate-800;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-600 rounded;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-500;
+}
+
+/* Message markdown styles */
+.message-content h1 {
+  @apply text-2xl font-bold mb-4 mt-6 first:mt-0;
+}
+
+.message-content h2 {
+  @apply text-xl font-semibold mb-3 mt-5 first:mt-0;
+}
+
+.message-content h3 {
+  @apply text-lg font-medium mb-2 mt-4 first:mt-0;
+}
+
+.message-content p {
+  @apply mb-3 last:mb-0;
+}
+
+.message-content ul, .message-content ol {
+  @apply mb-3 pl-5;
+}
+
+.message-content li {
+  @apply mb-1;
+}
+
+.message-content ul li {
+  @apply list-disc;
+}
+
+.message-content ol li {
+  @apply list-decimal;
+}
+
+.message-content code {
+  @apply bg-slate-700 px-1.5 py-0.5 rounded text-sm font-mono;
+}
+
+.message-content pre {
+  @apply bg-slate-800 p-4 rounded-lg mb-3 overflow-x-auto;
+}
+
+.message-content pre code {
+  @apply bg-transparent p-0;
+}
+
+.message-content blockquote {
+  @apply border-l-4 border-slate-500 pl-4 italic text-slate-300 my-3;
+}
+
+.message-content a {
+  @apply text-blue-400 hover:text-blue-300 underline;
+}
+
+.message-content strong {
+  @apply font-semibold;
+}
+
+/* Workspace color overrides */
+.workspace-normal {
+  --accent: theme('colors.sky.500');
+  --accent-hover: theme('colors.sky.400');
+}
+
+.workspace-church {
+  --accent: theme('colors.fuchsia.500');
+  --accent-hover: theme('colors.fuchsia.400');
+}
+
+.workspace-coder {
+  --accent: theme('colors.emerald.500');
+  --accent-hover: theme('colors.emerald.400');
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-pulse-slow {
+  animation: pulse 2s ease-in-out infinite;
+}
