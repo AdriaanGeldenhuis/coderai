@@ -26,7 +26,7 @@ $csrfToken = $_SESSION['csrf_token'] ?? '';
     <title>CoderAI - AI Chat Platform</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/assets/css/app.css?v=10">
+    <link rel="stylesheet" href="/assets/css/app.css?v=13">
 </head>
 <body>
     <div class="app-container">
@@ -229,8 +229,8 @@ $csrfToken = $_SESSION['csrf_token'] ?? '';
     <!-- Toast Container -->
     <div class="toast-container" id="toast-container"></div>
 
-    <!-- Scripts (v12 = always send selected model) -->
-    <script src="/assets/js/api.js?v=6"></script>
-    <script src="/assets/js/app.js?v=12"></script>
+    <!-- Scripts (v13 = streaming + model fix) -->
+    <script src="/assets/js/api.js?v=13"></script>
+    <script src="/assets/js/app.js?v=13"></script>
 </body>
 </html>
