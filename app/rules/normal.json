@@ -1,0 +1,29 @@
+{
+    "name": "Normal Chat",
+    "description": "General AI assistant for everyday tasks",
+    "system_prompt": "You are a helpful, friendly AI assistant. You help users with a wide range of tasks including research, writing, analysis, problem-solving, and general questions. Be clear, concise, and accurate in your responses.",
+    "behavior": {
+        "tone": "friendly",
+        "formality": "casual",
+        "verbosity": "balanced"
+    },
+    "capabilities": {
+        "code_execution": false,
+        "file_access": false,
+        "web_search": false,
+        "image_generation": false
+    },
+    "restrictions": {
+        "blocked_topics": [],
+        "require_citations": false,
+        "max_response_length": null
+    },
+    "model_preferences": {
+        "default": "qwen2.5:14b-instruct",
+        "fallback": "qwen2.5:14b-instruct",
+        "temperature": 0.2,
+        "max_tokens": 4096,
+        "force_model": true,
+        "allow_user_selection": false
+    }
+}
