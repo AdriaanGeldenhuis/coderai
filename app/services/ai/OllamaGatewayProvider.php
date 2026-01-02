@@ -165,4 +165,92 @@ class OllamaGatewayProvider
     {
         return false;
     }
+
+    /**
+     * Stream chat completion - yields chunks as they arrive
+     * This method directly outputs to the response stream
+     */
+    public function chatStream($messages, $options = [], $callback = null)
+    {
+        $model = $options['model'] ?? getenv('AI_MODEL_FAST');
+        $temperature = $options['temperature'] ?? (float) getenv('AI_TEMP_FAST');
+
+        $payload = [
+            'model' => $model,
+            'temperature' => $temperature,
+            'messages' => $messages,
+            'stream' => true
+        ];
+
+        $fullContent = '';
+        $inputTokens = $this->estimateTokens(json_encode($messages));
+
+        $ch = curl_init($this->gatewayUrl);
+
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => false,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($payload),
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/json',
+                'x-ai-key: ' . $this->apiKey
+            ],
+            CURLOPT_TIMEOUT => $this->timeout,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_WRITEFUNCTION => function($ch, $data) use (&$fullContent, $callback) {
+                // Parse streaming response - Ollama returns JSON lines
+                $lines = explode("\n", $data);
+                foreach ($lines as $line) {
+                    $line = trim($line);
+                    if (empty($line)) continue;
+
+                    $json = json_decode($line, true);
+                    if ($json && isset($json['message']['content'])) {
+                        $chunk = $json['message']['content'];
+                        $fullContent .= $chunk;
+
+                        // Call callback with chunk
+                        if ($callback) {
+                            $callback($chunk, $json['done'] ?? false);
+                        }
+                    } elseif ($json && isset($json['response'])) {
+                        // Alternative Ollama format
+                        $chunk = $json['response'];
+                        $fullContent .= $chunk;
+
+                        if ($callback) {
+                            $callback($chunk, $json['done'] ?? false);
+                        }
+                    }
+                }
+                return strlen($data);
+            }
+        ]);
+
+        $result = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($error) {
+            throw new Exception('AI gateway unavailable: ' . $error);
+        }
+
+        if ($httpCode !== 200) {
+            throw new Exception('AI gateway error (HTTP ' . $httpCode . ')');
+        }
+
+        $outputTokens = $this->estimateTokens($fullContent);
+
+        return [
+            'content' => $fullContent,
+            'model' => $model,
+            'provider' => 'ollama_gateway',
+            'usage' => [
+                'input_tokens' => $inputTokens,
+                'output_tokens' => $outputTokens,
+                'total_tokens' => $inputTokens + $outputTokens
+            ]
+        ];
+    }
 }

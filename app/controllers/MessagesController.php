@@ -4,6 +4,8 @@
  *
  * FIXED: Token-based context budgeting instead of message count
  * FIXED: Uses model preferences from rules
+ * NEW: Streaming support for live typing effect
+ * NEW: Bible context for church workspace
  */
 
 if (!defined('CODERAI')) {
@@ -14,8 +16,10 @@ require_once __DIR__ . '/../middleware/RequireAuth.php';
 require_once __DIR__ . '/../core/Auth.php';
 require_once __DIR__ . '/../services/ai/AIClient.php';
 require_once __DIR__ . '/../services/ai/AutoRouter.php';
+require_once __DIR__ . '/../services/ai/OllamaGatewayProvider.php';
 require_once __DIR__ . '/../services/SettingsService.php';
 require_once __DIR__ . '/../services/RulesService.php';
+require_once __DIR__ . '/../services/BibleService.php';
 
 class MessagesController
 {
@@ -150,6 +154,15 @@ class MessagesController
 
         // Build system prompt
         $systemPrompt = RulesService::buildSystemPrompt($workspaceSlug, $projectRules);
+
+        // Add Bible context for church workspace ONLY
+        if ($workspaceSlug === 'church') {
+            $bibleContext = BibleService::getContextForMessage($input['content']);
+            if (!empty($bibleContext)) {
+                $systemPrompt .= "\n\n" . $bibleContext;
+            }
+        }
+
         $systemTokens = $this->estimateTokens($systemPrompt);
 
         // Calculate available budget for history
@@ -438,5 +451,191 @@ class MessagesController
             'workspace_blocked' => $shouldBlockThisWorkspace,
             'hard_stop_enabled' => $hardStop
         ];
+    }
+
+    /**
+     * POST /api/messages/stream
+     * Send message and stream AI response (Server-Sent Events)
+     */
+    public function stream($params, $input)
+    {
+        RequireAuth::handle();
+        $userId = Auth::id();
+        $isAdmin = Auth::isAdmin();
+
+        Response::validate($input, ['thread_id', 'content']);
+
+        if (SettingsService::isMaintenanceMode()) {
+            Response::error('System is in maintenance mode', 503);
+        }
+
+        $db = Bootstrap::getDB();
+
+        // Get thread with project info
+        $stmt = $db->prepare("
+            SELECT t.*, p.workspace_slug, p.rules_json as project_rules
+            FROM threads t
+            JOIN projects p ON t.project_id = p.id
+            WHERE t.id = ? AND t.user_id = ?
+        ");
+        $stmt->execute([$input['thread_id'], $userId]);
+        $thread = $stmt->fetch();
+
+        if (!$thread) {
+            Response::error('Thread not found', 404);
+        }
+
+        $workspaceSlug = $thread['workspace_slug'] ?? 'normal';
+        $projectRules = json_decode($thread['project_rules'], true) ?? [];
+
+        // Allow frontend workspace override
+        if (!empty($input['workspace']) && in_array($input['workspace'], ['normal', 'church', 'coder'])) {
+            $workspaceSlug = $input['workspace'];
+        }
+
+        // Budget check
+        $budgetCheck = $this->checkBudget($userId, $workspaceSlug, $isAdmin);
+        if ($budgetCheck['blocked']) {
+            Response::error($budgetCheck['message'], 429);
+        }
+
+        // Save user message
+        $stmt = $db->prepare("INSERT INTO messages (thread_id, role, content) VALUES (?, 'user', ?)");
+        $stmt->execute([$input['thread_id'], $input['content']]);
+        $userMessageId = $db->lastInsertId();
+
+        // Update thread timestamp
+        $stmt = $db->prepare("UPDATE threads SET updated_at = NOW() WHERE id = ?");
+        $stmt->execute([$input['thread_id']]);
+
+        // Get model preferences
+        $modelPrefs = RulesService::getModelPreferences($workspaceSlug);
+        $contextBudget = $modelPrefs['context_budget_tokens'] ?? 24000;
+        $outputReserve = $modelPrefs['output_reserve_tokens'] ?? 4000;
+        $maxTokens = $modelPrefs['max_tokens'] ?? 8192;
+
+        // Build system prompt
+        $systemPrompt = RulesService::buildSystemPrompt($workspaceSlug, $projectRules);
+
+        // Add Bible context for church workspace ONLY
+        if ($workspaceSlug === 'church') {
+            $bibleContext = BibleService::getContextForMessage($input['content']);
+            if (!empty($bibleContext)) {
+                $systemPrompt .= "\n\n" . $bibleContext;
+            }
+        }
+
+        $systemTokens = $this->estimateTokens($systemPrompt);
+        $historyBudget = $contextBudget - $systemTokens - $outputReserve;
+
+        // Get context messages
+        $history = $this->getContextWithTokenBudget($db, $input['thread_id'], $historyBudget);
+
+        // Prepare messages for AI
+        $messages = [];
+        if ($systemPrompt) {
+            $messages[] = ['role' => 'system', 'content' => $systemPrompt];
+        }
+        foreach ($history as $msg) {
+            $messages[] = ['role' => $msg['role'], 'content' => $msg['content']];
+        }
+
+        // Model routing
+        $routerOptions = [];
+        if (!empty($input['model'])) {
+            $routerOptions['requested_model'] = $input['model'];
+        }
+        $routingResult = AutoRouter::route($workspaceSlug, $input['content'], $routerOptions);
+        $model = $routingResult['model'];
+
+        $routingMode = $routingResult['mode'] ?? 'fast';
+        $temperature = ($routingMode === 'precise')
+            ? ($modelPrefs['temperature'] ?? 0.1)
+            : (($modelPrefs['temperature'] ?? 0.2) + 0.1);
+
+        // Set up SSE headers
+        header('Content-Type: text/event-stream');
+        header('Cache-Control: no-cache');
+        header('Connection: keep-alive');
+        header('X-Accel-Buffering: no');
+
+        // Disable output buffering
+        if (ob_get_level()) ob_end_clean();
+
+        // Send initial event
+        echo "event: start\n";
+        echo "data: " . json_encode(['model' => $model, 'user_message_id' => $userMessageId]) . "\n\n";
+        flush();
+
+        $fullContent = '';
+
+        try {
+            $provider = new OllamaGatewayProvider();
+
+            $result = $provider->chatStream($messages, [
+                'model' => $model,
+                'temperature' => $temperature,
+                'max_tokens' => min($maxTokens, $outputReserve)
+            ], function($chunk, $done) use (&$fullContent) {
+                $fullContent .= $chunk;
+
+                // Send chunk event
+                echo "event: chunk\n";
+                echo "data: " . json_encode(['content' => $chunk, 'done' => $done]) . "\n\n";
+                flush();
+            });
+
+            // Save assistant message
+            $stmt = $db->prepare("
+                INSERT INTO messages (thread_id, role, content, tokens_used, model)
+                VALUES (?, 'assistant', ?, ?, ?)
+            ");
+            $stmt->execute([
+                $input['thread_id'],
+                $fullContent,
+                $result['usage']['total_tokens'],
+                $model
+            ]);
+            $assistantMessageId = $db->lastInsertId();
+
+            // Track usage
+            AIClient::trackUsage(
+                $userId,
+                $workspaceSlug,
+                $model,
+                'ollama_gateway',
+                $result['usage']['input_tokens'],
+                $result['usage']['output_tokens']
+            );
+
+            // Auto-title
+            $stmt = $db->prepare("SELECT COUNT(*) as count FROM messages WHERE thread_id = ?");
+            $stmt->execute([$input['thread_id']]);
+            $count = $stmt->fetch()['count'];
+
+            if ($count <= 2 && ($thread['title'] === 'New Conversation' || empty($thread['title']) || $thread['title'] === 'New Chat')) {
+                $newTitle = $this->generateTitle($input['content'], $model);
+                $stmt = $db->prepare("UPDATE threads SET title = ? WHERE id = ?");
+                $stmt->execute([$newTitle, $input['thread_id']]);
+            }
+
+            // Send done event
+            echo "event: done\n";
+            echo "data: " . json_encode([
+                'assistant_message_id' => $assistantMessageId,
+                'model' => $model,
+                'tokens' => $result['usage']['total_tokens']
+            ]) . "\n\n";
+            flush();
+
+        } catch (Exception $e) {
+            error_log('Streaming AI Error: ' . $e->getMessage());
+
+            echo "event: error\n";
+            echo "data: " . json_encode(['error' => 'AI service unavailable']) . "\n\n";
+            flush();
+        }
+
+        exit;
     }
 }

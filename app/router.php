@@ -67,6 +67,7 @@ class Router
         // Messages routes (Section 7)
         $this->get('/api/messages', 'MessagesController@index');
         $this->post('/api/messages', 'MessagesController@store');
+        $this->post('/api/messages/stream', 'MessagesController@stream');
 
         // Repos routes (Section 9)
         $this->get('/api/repos', 'ReposController@index');

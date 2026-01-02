@@ -600,75 +600,126 @@ const App = {
         // Add user message optimistically
         this.state.messages.push({ role: 'user', content: content, created_at: new Date().toISOString() });
         this.renderMessages();
-        this.showTypingIndicator();
+
+        // Add empty assistant message for streaming
+        const streamingMessage = {
+            role: 'assistant',
+            content: '',
+            created_at: new Date().toISOString(),
+            model: '',
+            isStreaming: true
+        };
+        this.state.messages.push(streamingMessage);
+        this.renderMessages();
+
+        const options = {
+            workspace: this.state.currentWorkspace,
+            model: this.state.selectedModel
+        };
+        console.log('📤 Sending streaming message with options:', options);
 
         try {
-            // ALWAYS send workspace and selected model
-            const options = {
-                workspace: this.state.currentWorkspace,
-                model: this.state.selectedModel
-            };
-            console.log('📤 Sending message with options:', options);
-            console.log('📤 Current state.currentWorkspace:', this.state.currentWorkspace);
-            const response = await API.messages.send(this.state.currentThread.id, content, options);
+            await API.messages.sendStream(
+                this.state.currentThread.id,
+                content,
+                options,
+                {
+                    onStart: (data) => {
+                        console.log('🚀 Stream started:', data);
+                        streamingMessage.model = data.model;
+                    },
+                    onChunk: (chunk, fullContent) => {
+                        // Update the streaming message content
+                        streamingMessage.content = fullContent;
+                        this.updateStreamingMessage(streamingMessage);
+                    },
+                    onDone: async (data, fullContent) => {
+                        console.log('✅ Stream done:', data);
+                        streamingMessage.content = fullContent;
+                        streamingMessage.model = data.model;
+                        streamingMessage.tokens = data.tokens;
+                        streamingMessage.isStreaming = false;
+                        this.renderMessages();
 
-            this.hideTypingIndicator();
-
-            if (response.data?.assistant_message) {
-                this.state.messages.push(response.data.assistant_message);
-            }
-
-            // Console logging for debugging
-            if (response.data?.routing) {
-                console.log('🤖 Routing:', response.data.routing);
-            }
-
-            if (response.data?.context) {
-                console.log('📊 Context:', response.data.context);
-            }
-
-            // Handle budget warnings
-            if (response.data?.budget_warning) {
-                const bw = response.data.budget_warning;
-                if (bw.will_block_soon) {
-                    this.showBudgetBanner('critical', bw.message, bw.percent_used);
-                } else {
-                    this.showBudgetBanner('warning', bw.message, bw.percent_used);
+                        // Update thread title if needed
+                        if (this.state.messages.length === 2) {
+                            const threadResponse = await API.threads.get(this.state.currentThread.id);
+                            this.state.currentThread.title = threadResponse.data.thread.title;
+                            this.elements.currentChatTitle.textContent = this.state.currentThread.title;
+                            await this.loadThreads(this.state.currentProject.id);
+                        }
+                    },
+                    onError: (error) => {
+                        console.error('❌ Stream error:', error);
+                        // Remove the streaming message
+                        this.state.messages.pop();
+                        this.showToast('AI error: ' + error, 'error');
+                        this.renderMessages();
+                    }
                 }
-            }
-
-            // Update thread title if needed
-            if (this.state.messages.length === 2) {
-                const threadResponse = await API.threads.get(this.state.currentThread.id);
-                this.state.currentThread.title = threadResponse.data.thread.title;
-                this.elements.currentChatTitle.textContent = this.state.currentThread.title;
-                await this.loadThreads(this.state.currentProject.id);
-            }
-
-            this.renderMessages();
-
+            );
         } catch (error) {
-            this.hideTypingIndicator();
-            
-            // Handle budget blocked error
+            console.error('Stream failed:', error);
+
+            // Remove streaming message on error
+            this.state.messages.pop();
+
             if (error.message?.includes('budget') || error.message?.includes('429')) {
                 this.showBudgetBanner('blocked', error.message, 100);
+                this.state.messages.pop(); // Also remove user message
+            } else if (error.message?.includes('unavailable') || error.message?.includes('offline')) {
+                this.showToast('AI is currently unavailable. Please try again later.', 'error');
                 this.state.messages.pop();
-            } 
-            // Handle AI unavailable error
-            else if (error.message?.includes('unavailable') || error.message?.includes('offline')) {
-                this.showToast('⚠️ AI is currently unavailable. Please try again later.', 'error');
-                this.state.messages.pop();
-            }
-            else {
+            } else {
                 this.showToast('Failed: ' + error.message, 'error');
                 this.state.messages.pop();
             }
-            
+
             this.renderMessages();
         } finally {
             this.state.isSending = false;
         }
+    },
+
+    // Update streaming message in real-time
+    updateStreamingMessage(msg) {
+        const messagesWrapper = this.elements.messagesWrapper;
+        if (!messagesWrapper) return;
+
+        // Find or create the streaming message element
+        let streamEl = messagesWrapper.querySelector('.message.streaming');
+
+        if (!streamEl) {
+            // Create new streaming message element
+            streamEl = document.createElement('div');
+            streamEl.className = 'message assistant streaming';
+            streamEl.innerHTML = `
+                <div class="message-avatar">AI</div>
+                <div class="message-content">
+                    <div class="message-header">
+                        <span class="message-sender">CoderAI</span>
+                        <span class="message-time">${this.formatTime(msg.created_at)}</span>
+                        <span class="message-model">${msg.model || 'thinking...'}</span>
+                    </div>
+                    <div class="message-body streaming-content"></div>
+                </div>
+            `;
+            messagesWrapper.appendChild(streamEl);
+        }
+
+        // Update content
+        const contentEl = streamEl.querySelector('.streaming-content');
+        if (contentEl) {
+            contentEl.innerHTML = this.formatMessage(msg.content);
+        }
+
+        // Update model if available
+        const modelEl = streamEl.querySelector('.message-model');
+        if (modelEl && msg.model) {
+            modelEl.textContent = msg.model;
+        }
+
+        this.scrollToBottom();
     },
 
     showBudgetBanner(level, message, percent) {

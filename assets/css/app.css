@@ -816,6 +816,27 @@ body {
     }
 }
 
+/* ==================== STREAMING CURSOR ==================== */
+.message.streaming .streaming-content::after {
+    content: '▋';
+    animation: blink 1s infinite;
+    color: var(--purple-primary);
+    margin-left: 2px;
+}
+
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+}
+
+.message.streaming {
+    opacity: 1;
+}
+
+.message.streaming .message-model {
+    color: var(--purple-light);
+}
+
 /* ==================== INPUT AREA ==================== */
 .input-area {
     background: var(--glass-bg);

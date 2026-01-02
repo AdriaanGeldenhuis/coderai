@@ -149,6 +149,94 @@ const API = {
                 data.model = options.model;
             }
             return API.post('/messages', data);
+        },
+
+        /**
+         * Send message with streaming response (Server-Sent Events)
+         * Returns EventSource for live updates
+         */
+        sendStream(threadId, content, options = {}, callbacks = {}) {
+            const data = {
+                thread_id: threadId,
+                content: content
+            };
+            if (options.workspace) {
+                data.workspace = options.workspace;
+            }
+            if (options.model) {
+                data.model = options.model;
+            }
+
+            // Use fetch with streaming
+            return new Promise((resolve, reject) => {
+                fetch(API.baseUrl + '/messages/stream', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || ''
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(data)
+                }).then(response => {
+                    if (!response.ok) {
+                        throw new Error('Stream request failed');
+                    }
+
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    let fullContent = '';
+                    let result = {};
+
+                    function processLine(line) {
+                        if (line.startsWith('event: ')) {
+                            result.currentEvent = line.slice(7).trim();
+                        } else if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+
+                                if (result.currentEvent === 'start') {
+                                    if (callbacks.onStart) callbacks.onStart(data);
+                                } else if (result.currentEvent === 'chunk') {
+                                    fullContent += data.content || '';
+                                    if (callbacks.onChunk) callbacks.onChunk(data.content, fullContent);
+                                } else if (result.currentEvent === 'done') {
+                                    result.done = data;
+                                    result.fullContent = fullContent;
+                                    if (callbacks.onDone) callbacks.onDone(data, fullContent);
+                                } else if (result.currentEvent === 'error') {
+                                    if (callbacks.onError) callbacks.onError(data.error);
+                                    reject(new Error(data.error));
+                                }
+                            } catch (e) {
+                                console.warn('Failed to parse SSE data:', line);
+                            }
+                        }
+                    }
+
+                    function read() {
+                        reader.read().then(({ done, value }) => {
+                            if (done) {
+                                // Process any remaining buffer
+                                if (buffer.trim()) {
+                                    buffer.split('\n').forEach(processLine);
+                                }
+                                resolve(result);
+                                return;
+                            }
+
+                            buffer += decoder.decode(value, { stream: true });
+                            const lines = buffer.split('\n');
+                            buffer = lines.pop() || '';
+
+                            lines.forEach(processLine);
+                            read();
+                        }).catch(reject);
+                    }
+
+                    read();
+                }).catch(reject);
+            });
         }
     },
 
