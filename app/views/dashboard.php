@@ -229,8 +229,8 @@ $csrfToken = $_SESSION['csrf_token'] ?? '';
     <!-- Toast Container -->
     <div class="toast-container" id="toast-container"></div>
 
-    <!-- Scripts (v13 = streaming + model fix) -->
-    <script src="/assets/js/api.js?v=13"></script>
-    <script src="/assets/js/app.js?v=13"></script>
+    <!-- Scripts (v14 = streaming content display fix) -->
+    <script src="/assets/js/api.js?v=14"></script>
+    <script src="/assets/js/app.js?v=14"></script>
 </body>
 </html>

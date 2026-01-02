@@ -553,19 +553,25 @@ const App = {
             return;
         }
 
-        this.elements.messagesWrapper.innerHTML = this.state.messages.map(msg => `
-            <div class="message ${msg.role}">
-                <div class="message-avatar">${msg.role === 'user' ? 'U' : 'AI'}</div>
-                <div class="message-content">
-                    <div class="message-header">
-                        <span class="message-sender">${msg.role === 'user' ? 'You' : 'CoderAI'}</span>
-                        <span class="message-time">${this.formatTime(msg.created_at)}</span>
-                        ${msg.model ? `<span class="message-model">${msg.model}</span>` : ''}
+        this.elements.messagesWrapper.innerHTML = this.state.messages.map(msg => {
+            const isStreaming = msg.isStreaming === true;
+            const streamingClass = isStreaming ? ' streaming' : '';
+            const bodyClass = isStreaming ? 'message-body streaming-content' : 'message-body';
+
+            return `
+                <div class="message ${msg.role}${streamingClass}">
+                    <div class="message-avatar">${msg.role === 'user' ? 'U' : 'AI'}</div>
+                    <div class="message-content">
+                        <div class="message-header">
+                            <span class="message-sender">${msg.role === 'user' ? 'You' : 'CoderAI'}</span>
+                            <span class="message-time">${this.formatTime(msg.created_at)}</span>
+                            ${msg.model ? `<span class="message-model">${msg.model}</span>` : ''}
+                        </div>
+                        <div class="${bodyClass}">${this.formatMessage(msg.content)}</div>
                     </div>
-                    <div class="message-body">${this.formatMessage(msg.content)}</div>
                 </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
 
         this.scrollToBottom();
     },
@@ -686,40 +692,24 @@ const App = {
         const messagesWrapper = this.elements.messagesWrapper;
         if (!messagesWrapper) return;
 
-        // Find or create the streaming message element
+        // Find the streaming message element (created by renderMessages with .streaming class)
         let streamEl = messagesWrapper.querySelector('.message.streaming');
 
-        if (!streamEl) {
-            // Create new streaming message element
-            streamEl = document.createElement('div');
-            streamEl.className = 'message assistant streaming';
-            streamEl.innerHTML = `
-                <div class="message-avatar">AI</div>
-                <div class="message-content">
-                    <div class="message-header">
-                        <span class="message-sender">CoderAI</span>
-                        <span class="message-time">${this.formatTime(msg.created_at)}</span>
-                        <span class="message-model">${msg.model || 'thinking...'}</span>
-                    </div>
-                    <div class="message-body streaming-content"></div>
-                </div>
-            `;
-            messagesWrapper.appendChild(streamEl);
-        }
+        if (streamEl) {
+            // Update content
+            const contentEl = streamEl.querySelector('.streaming-content');
+            if (contentEl) {
+                contentEl.innerHTML = this.formatMessage(msg.content);
+            }
 
-        // Update content
-        const contentEl = streamEl.querySelector('.streaming-content');
-        if (contentEl) {
-            contentEl.innerHTML = this.formatMessage(msg.content);
-        }
+            // Update model if available
+            const modelEl = streamEl.querySelector('.message-model');
+            if (modelEl && msg.model) {
+                modelEl.textContent = msg.model;
+            }
 
-        // Update model if available
-        const modelEl = streamEl.querySelector('.message-model');
-        if (modelEl && msg.model) {
-            modelEl.textContent = msg.model;
+            this.scrollToBottom();
         }
-
-        this.scrollToBottom();
     },
 
     showBudgetBanner(level, message, percent) {
