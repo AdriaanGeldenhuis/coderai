@@ -1,12 +1,12 @@
 <?php
 /**
  * CoderAI Auto Router
- * ✅ UPDATED: Workspace-based routing with proper model separation
+ * ✅ UPDATED: User can select ANY model from dropdown in ALL workspaces
  *
- * Rules:
- * - normal: ALWAYS qwen2.5:14b-instruct (no user selection)
- * - church: ALWAYS qwen2.5:14b-instruct (no user selection)
- * - coder: dropdown with qwen2.5-coder:7b, qwen2.5-coder:14b, qwen2.5:14b-instruct
+ * All workspaces now have model selection:
+ * - normal: User selects from general models
+ * - church: User selects from general models
+ * - coder: User selects from all models (general + coder)
  */
 
 if (!defined('CODERAI')) {
@@ -27,87 +27,42 @@ class AutoRouter
      */
     public static function route($workspace, $userMessage, $options = [])
     {
-        // Models for each workspace type
-        $instructModel = 'qwen2.5:14b-instruct';
-        $coderFast = 'qwen2.5-coder:7b';
-        $coderPrecise = 'qwen2.5-coder:14b';
-
-        // Route based on workspace
-        switch ($workspace) {
-            case 'normal':
-                return self::routeNormal($instructModel);
-
-            case 'church':
-                return self::routeChurch($instructModel);
-
-            case 'coder':
-                return self::routeCoder($coderFast, $coderPrecise, $instructModel, $options);
-
-            default:
-                return self::routeNormal($instructModel);
-        }
-    }
-
-    /**
-     * Route for Normal workspace
-     * ALWAYS use qwen2.5:14b-instruct
-     */
-    private static function routeNormal($instructModel)
-    {
-        return self::buildResult(
-            $instructModel,
-            'forced_by_rules',
-            'rules',
-            'normal'
-        );
-    }
-
-    /**
-     * Route for Church workspace
-     * ALWAYS use qwen2.5:14b-instruct
-     */
-    private static function routeChurch($instructModel)
-    {
-        return self::buildResult(
-            $instructModel,
-            'forced_by_rules',
-            'rules',
-            'church'
-        );
-    }
-
-    /**
-     * Route for Coder workspace
-     * User can choose from: qwen2.5-coder:7b, qwen2.5-coder:14b, qwen2.5:14b-instruct
-     */
-    private static function routeCoder($coderFast, $coderPrecise, $instructModel, $options)
-    {
-        // Check for explicit model request from dropdown
+        // Check for explicit model request from dropdown (works for ALL workspaces)
         $requestedModel = $options['requested_model'] ?? null;
 
-        // If user explicitly selected a model from dropdown
-        if ($requestedModel) {
-            // Validate and use the requested model
-            if ($requestedModel === 'qwen2.5-coder:7b' || $requestedModel === '7b' || $requestedModel === 'fast') {
-                return self::buildResult($coderFast, 'user_selected', 'fast', 'coder');
-            }
-            if ($requestedModel === 'qwen2.5-coder:14b' || $requestedModel === '14b' || $requestedModel === 'precise') {
-                return self::buildResult($coderPrecise, 'user_selected', 'precise', 'coder');
-            }
-            if ($requestedModel === 'qwen2.5:14b-instruct' || $requestedModel === 'instruct') {
-                return self::buildResult($instructModel, 'user_selected', 'instruct', 'coder');
-            }
+        if ($requestedModel && ModelCatalog::isAllowed($requestedModel)) {
+            // User selected a valid model - USE IT regardless of workspace
+            return self::buildResult(
+                $requestedModel,
+                'user_selected',
+                self::getModeForModel($requestedModel),
+                $workspace
+            );
         }
 
-        // Check mode parameter (for backwards compatibility with mode toggle)
-        $mode = $options['mode'] ?? 'fast';
+        // No model selected or invalid - use workspace defaults
+        $defaultModel = ModelCatalog::getDefaultForWorkspace($workspace);
+        return self::buildResult(
+            $defaultModel,
+            'default',
+            self::getModeForModel($defaultModel),
+            $workspace
+        );
+    }
 
-        if ($mode === 'precise') {
-            return self::buildResult($coderPrecise, 'mode_selected', 'precise', 'coder');
-        }
-
-        // Default to fast coder model
-        return self::buildResult($coderFast, 'default', 'fast', 'coder');
+    /**
+     * Get mode label for a model
+     */
+    private static function getModeForModel($model)
+    {
+        $modes = [
+            'qwen2.5:14b-instruct' => 'instruct',
+            'qwen2.5:32b' => 'large',
+            'mistral-small:24b' => 'mistral',
+            'qwen2.5-coder:7b' => 'fast',
+            'qwen2.5-coder:14b' => 'precise'
+        ];
+        return $modes[$model] ?? 'default';
     }
 
     /**

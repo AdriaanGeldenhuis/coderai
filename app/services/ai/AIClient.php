@@ -27,9 +27,10 @@ class AIClient
         // Normalize model name
         $model = ModelCatalog::normalizeModelName($model);
         
-        // Validate model (only allow our 2 models)
+        // Validate model
         if (!ModelCatalog::isAllowed($model)) {
-            throw new Exception("Model not allowed: {$model}. Only qwen2.5-coder:7b and qwen2.5-coder:14b are supported.");
+            $allowedModels = implode(', ', ['qwen2.5:14b-instruct', 'qwen2.5:32b', 'mistral-small:24b', 'qwen2.5-coder:7b', 'qwen2.5-coder:14b']);
+            throw new Exception("Model not allowed: {$model}. Allowed models: {$allowedModels}");
         }
 
         $provider = self::getProvider('ollama_gateway');

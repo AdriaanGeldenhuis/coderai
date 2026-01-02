@@ -239,19 +239,14 @@ const App = {
     },
 
     updateModelSelectionVisibility() {
-        if (!this.elements.modelDropdownContainer || !this.elements.modelIndicator) return;
+        if (!this.elements.modelDropdownContainer) return;
 
-        // Show dropdown only in coder workspace
-        if (this.state.currentWorkspace === 'coder') {
-            this.elements.modelDropdownContainer.style.display = 'block';
+        // Show dropdown for ALL workspaces - user can always select model
+        this.elements.modelDropdownContainer.style.display = 'block';
+
+        // Hide the fixed indicator if it exists
+        if (this.elements.modelIndicator) {
             this.elements.modelIndicator.style.display = 'none';
-        } else {
-            // CHAT and CHURCH show fixed model indicator
-            this.elements.modelDropdownContainer.style.display = 'none';
-            this.elements.modelIndicator.style.display = 'flex';
-            if (this.elements.currentModelName) {
-                this.elements.currentModelName.textContent = 'qwen2.5:14b-instruct';
-            }
         }
     },
 

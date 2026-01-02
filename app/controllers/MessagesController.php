@@ -167,17 +167,15 @@ class MessagesController
             $messages[] = ['role' => $msg['role'], 'content' => $msg['content']];
         }
 
-        // Model selection
-        // Normal and Church workspaces: always use instruct model (forced by rules)
-        // Coder workspace: user can select from dropdown
+        // Model selection - ALL workspaces now support user model selection
         $routerOptions = [];
 
-        if ($workspaceSlug === 'coder' && !empty($input['model'])) {
-            // User selected a specific model from dropdown
+        if (!empty($input['model'])) {
+            // User selected a specific model from dropdown - pass it for ANY workspace
             $routerOptions['requested_model'] = $input['model'];
         }
 
-        // Route to appropriate model based on workspace
+        // Route to appropriate model based on workspace and user selection
         $routingResult = AutoRouter::route($workspaceSlug, $input['content'], $routerOptions);
         $model = $routingResult['model'];
 

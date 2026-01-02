@@ -200,15 +200,21 @@ class ModelCatalog
             // Shortcuts
             '7b' => 'qwen2.5-coder:7b',
             '14b' => 'qwen2.5-coder:14b',
+            '32b' => 'qwen2.5:32b',
+            '24b' => 'mistral-small:24b',
             'fast' => 'qwen2.5-coder:7b',
             'precise' => 'qwen2.5-coder:14b',
             'quick' => 'qwen2.5-coder:7b',
             'smart' => 'qwen2.5-coder:14b',
             'instruct' => 'qwen2.5:14b-instruct',
             'chat' => 'qwen2.5:14b-instruct',
+            'large' => 'qwen2.5:32b',
+            'mistral' => 'mistral-small:24b',
 
-            // Full names
+            // Full names (all 5 models)
             'qwen2.5:14b-instruct' => 'qwen2.5:14b-instruct',
+            'qwen2.5:32b' => 'qwen2.5:32b',
+            'mistral-small:24b' => 'mistral-small:24b',
             'qwen2.5-coder:7b' => 'qwen2.5-coder:7b',
             'qwen2.5-coder:14b' => 'qwen2.5-coder:14b'
         ];
@@ -259,7 +265,7 @@ class ModelCatalog
      */
     public static function getAllIds()
     {
-        return ['qwen2.5:14b-instruct', 'qwen2.5-coder:7b', 'qwen2.5-coder:14b'];
+        return ['qwen2.5:14b-instruct', 'qwen2.5:32b', 'mistral-small:24b', 'qwen2.5-coder:7b', 'qwen2.5-coder:14b'];
     }
 
     /**
@@ -267,13 +273,14 @@ class ModelCatalog
      */
     public static function getTier($modelId)
     {
-        if ($modelId === 'qwen2.5-coder:7b') {
-            return 'cheap';
-        }
-        if ($modelId === 'qwen2.5-coder:14b' || $modelId === 'qwen2.5:14b-instruct') {
-            return 'premium';
-        }
-        return 'medium';
+        $tiers = [
+            'qwen2.5-coder:7b' => 'cheap',
+            'qwen2.5:14b-instruct' => 'medium',
+            'qwen2.5-coder:14b' => 'premium',
+            'mistral-small:24b' => 'premium',
+            'qwen2.5:32b' => 'premium'
+        ];
+        return $tiers[$modelId] ?? 'medium';
     }
 
     /**
